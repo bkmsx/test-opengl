@@ -23,4 +23,23 @@
         android:layout_height="wrap_content"
         android:layout_toRightOf="@+id/btn_negative"
         android:text="GrayScale"/>
+    <Button
+        android:id="@+id/btn_video_1"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toRightOf="@+id/btn_grayscale"
+        android:text="Video 1"/>
+    <Button
+        android:id="@+id/btn_video_2"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_toRightOf="@+id/btn_video_1"
+        android:text="Video 2"/>
+    <SeekBar
+        android:id="@+id/seekbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="100"
+        android:layout_alignParentBottom="true"
+        android:layout_marginBottom="10dp"/>
 </RelativeLayout>

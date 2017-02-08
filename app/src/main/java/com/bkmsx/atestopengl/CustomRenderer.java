@@ -1,17 +1,14 @@
 package com.bkmsx.atestopengl;
 
 import android.content.Context;
-import android.content.res.AssetFileDescriptor;
 import android.graphics.SurfaceTexture;
-import android.media.MediaPlayer;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import android.os.SystemClock;
 import android.util.Log;
-import android.view.Surface;
+import android.view.MotionEvent;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
@@ -24,46 +21,35 @@ import javax.microedition.khronos.opengles.GL10;
  * Created by bkmsx on 1/25/2017.
  */
 
-public class CustomRenderer implements GLSurfaceView.Renderer{
+public class CustomRenderer implements GLSurfaceView.Renderer {
     Context mContext;
     int a = 1;
-    float[] triangleParams =
-            {-1f, -1f, 0.0f,
-//                            1.0f, 0.0f, 0.0f, 1.0f,
+    float[] triangleParams;
+    short order[];
 
-                    1f, -1, 0.0f,
-//                            0.0f, 0.0f, 1.0f, 1.0f,
-
-                    -1, 1, 0.0f,
-//                            0.0f, 1.0f, 0.0f, 1.0f,
-
-                    1, 1f, 0.0f};
-    //                            1f, 1f, 1f, 1f};
-    short order[] = {0, 1, 2, 1, 2, 3};
-
-    float[] texCoords = {
-            0, 0,
-            1, 0,
-            0, 1,
-            1, 1
-    };
+    float[] texCoords;
+    float[] colors;
 
     FloatBuffer vertexBuffer;
     ShortBuffer orderBuffer;
     FloatBuffer texBuffer;
+    FloatBuffer colorBuffer;
     int programHandle;
 
     String vertexCode = "uniform mat4 u_MVPMatrix; \n" +
             "attribute vec4 a_Position; \n" +
             "attribute vec4 a_Texture;" +
+            "attribute vec4 a_Color;" +
             "uniform mat4 u_TextureMatrix;" +
             "varying vec2 v_Texture;" +
+            "varying vec4 v_Color;" +
 //            "attribute vec4 a_Color; \n" +
 //            "varying vec4 v_Color; \n" +
 
             "void main() \n" +
             "{ \n" +
             "v_Texture = (u_TextureMatrix * a_Texture).xy;" +
+            "v_Color = a_Color;" +
 //            "v_Color = a_Color; \n" +
             "gl_Position = u_MVPMatrix * a_Position; \n" +
             "} \n";
@@ -83,12 +69,14 @@ public class CustomRenderer implements GLSurfaceView.Renderer{
     String fragmentCodeNormal = "#extension GL_OES_EGL_image_external : require\n" +
             "precision mediump float; \n" +
             "varying vec2 v_Texture;" +
+            "varying vec4 v_Color;" +
             "uniform samplerExternalOES s_Texture;" +
 //            "varying vec4 v_Color; \n" +
 
             "void main() \n" +
             "{ \n" +
-            "vec4 color = texture2D(s_Texture, v_Texture);" +
+            "vec4 color = texture2D(s_Texture, v_Texture) * v_Color;" +
+            "color.rgb *= v_Color.a;" +
             "gl_FragColor = color; \n" +
             "} \n";
     String fragmentCodeGray = "#extension GL_OES_EGL_image_external : require\n" +
@@ -100,9 +88,10 @@ public class CustomRenderer implements GLSurfaceView.Renderer{
             "void main() \n" +
             "{ \n" +
             "vec4 color = texture2D(s_Texture, v_Texture);" +
-            "gl_FragColor = vec4(color.r * 0.21 + color.g * 0.72 + color.b * 0.07," +
-            "color.r * 0.21 + color.g * 0.72 + color.b * 0.07," +
-            "color.r * 0.21 + color.g * 0.72 + color.b * 0.07," +
+            "float c = (color.r + color.g + color.b)/3.0;" +
+            "gl_FragColor = vec4(c," +
+            "c," +
+            "c," +
             " color.a);\n"
             + "}";
     String fragmentCode;
@@ -117,20 +106,142 @@ public class CustomRenderer implements GLSurfaceView.Renderer{
     int[] textureNames;
     int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
     OnSurfaceTextureCreated onSurfaceTextureCreated;
+    int mScreenWidth;
+    VerticesCoords verticesCoords;
 
-    CustomRenderer (Context context, int type) {
-        mContext = context;
-        switch (type) {
-            case 0: fragmentCode = fragmentCodeNormal;
-                break;
-            case 1: fragmentCode = fragmentCodeNegative;
-                break;
-            case 2: fragmentCode = fragmentCodeGray;
-                break;
-        }
+    int colorHandle;
+
+    float red = 1;
+
+    class VerticesCoords {
+        float left, right, top, bottom;
     }
 
+    CustomRenderer(Context context, int type) {
+        mContext = context;
+        switch (type) {
+            case 0:
+                fragmentCode = fragmentCodeNormal;
+                break;
+            case 1:
+                fragmentCode = fragmentCodeNegative;
+                break;
+            case 2:
+                fragmentCode = fragmentCodeGray;
+                break;
+        }
+        verticesCoords = new VerticesCoords();
+        verticesCoords.left = -1;
+        verticesCoords.right = 1;
+        verticesCoords.top = 1;
+        verticesCoords.bottom = -1;
+    }
 
+    public void setRed(float value) {
+        red = value;
+        setTextureCoords();
+    }
+
+    public void processTouchEvent(MotionEvent event) {
+        if (event.getX() < mScreenWidth / 2) {
+            verticesCoords.left -= 0.1f;
+            verticesCoords.right -= 0.1f;
+        } else {
+            verticesCoords.left += 0.1f;
+            verticesCoords.right += 0.1f;
+        }
+        setTextureCoords();
+    }
+
+    private void setTextureCoords() {
+        triangleParams = new float[]{
+                -1, -1, 0,
+                -1, 0, 0,
+                0, 0, 0,
+                0, -1, 0,
+
+                -1, 0, 0,
+                -1, 1, 0,
+                0, 1, 0,
+                0, 0, 0,
+
+                0, 0, 0,
+                0, 1, 0,
+                1, 1, 0,
+                1, 0, 0,
+
+                0, -1, 0,
+                0, 0, 0,
+                1, 0, 0,
+                1, -1, 0
+        };
+
+        order = new short[]
+                {0, 1, 2,
+                        0, 2, 3,
+
+                        4, 5, 6,
+                        4, 6, 7,
+
+                        8, 9, 10,
+                        8, 10, 11,
+
+                        12, 13, 14,
+                        12, 14, 15
+                };
+
+        texCoords = new float[]{
+                0, 0,
+                0, 0.5f,
+                0.5f, 0.5f,
+                0.5f, 0,
+
+                0.5f, 0,
+                0.5f, 0.5f,
+                1, 0.5f,
+                1, 0,
+
+                0, 0.5f,
+                0, 1f,
+                0.5f, 1f,
+                0.5f, 0.5f,
+
+                0.5f, 0.5f,
+                0.5f, 1f,
+                1f, 1f,
+                1f, 0.5f
+        };
+
+        colors = new float[] {
+                red, red, 1, 1,
+                red, red, 1, 1,
+                red, red, 1, 1,
+                red, red, 1, 1,
+
+                red, red, 1, 1,
+                red, red, 1, 1,
+                red, red, 1, 1,
+                red, red, 1, 1,
+
+                red, red, 1, 1,
+                red, red, 1, 1,
+                red, red, 1, 1,
+                red, red, 1, 1,
+
+                red, red, 1, 1,
+                red, red, 1, 1,
+                red, red, 1, 1,
+                red, red, 1, 1,
+        };
+
+        vertexBuffer = ByteBuffer.allocateDirect(triangleParams.length * 4)
+                .order(ByteOrder.nativeOrder()).asFloatBuffer();
+        vertexBuffer.put(triangleParams).position(0);
+
+        colorBuffer = ByteBuffer.allocateDirect(colors.length * 4)
+                .order(ByteOrder.nativeOrder()).asFloatBuffer();
+        colorBuffer.put(colors).position(0);
+    }
 
     public SurfaceTexture getSurfaceTexture() {
         return surfaceTexture;
@@ -140,9 +251,7 @@ public class CustomRenderer implements GLSurfaceView.Renderer{
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         GLES20.glClearColor(1, 1, 0.5f, 1);
 
-        vertexBuffer = ByteBuffer.allocateDirect(triangleParams.length * 4)
-                .order(ByteOrder.nativeOrder()).asFloatBuffer();
-        vertexBuffer.put(triangleParams).position(0);
+        setTextureCoords();
 
         orderBuffer = ByteBuffer.allocateDirect(order.length * 2)
                 .order(ByteOrder.nativeOrder()).asShortBuffer();
@@ -182,7 +291,7 @@ public class CustomRenderer implements GLSurfaceView.Renderer{
         mMVPMatrixHandle = GLES20.glGetUniformLocation(programHandle, "u_MVPMatrix");
         mTextureMatrixHandle = GLES20.glGetUniformLocation(programHandle, "u_TextureMatrix");
         mPositionHandle = GLES20.glGetAttribLocation(programHandle, "a_Position");
-//        mColorHandle = GLES20.glGetAttribLocation(programHandle, "a_Color");
+        mColorHandle = GLES20.glGetAttribLocation(programHandle, "a_Color");
         mTexHandle = GLES20.glGetAttribLocation(programHandle, "a_Texture");
         Matrix.setLookAtM(mViewMatrix, 0, 0, 0, 1f, 0f, 0f, 0, 0f, 0.5f, 0);
         GLES20.glUseProgram(programHandle);
@@ -213,7 +322,7 @@ public class CustomRenderer implements GLSurfaceView.Renderer{
 //        bitmap.recycle();
     }
 
-    public void setOnSurfaceTextureListener(OnSurfaceTextureCreated listener){
+    public void setOnSurfaceTextureListener(OnSurfaceTextureCreated listener) {
         onSurfaceTextureCreated = listener;
     }
 
@@ -235,7 +344,7 @@ public class CustomRenderer implements GLSurfaceView.Renderer{
     @Override
     public void onSurfaceChanged(GL10 gl, int width, int height) {
         GLES20.glViewport(0, 0, width, height);
-
+        mScreenWidth = width;
         float ratio = (float) width / height;
         Matrix.frustumM(mProjectionMatrix, 0, -1.0f, 1.0f, -1.0f, 1.0f,
                 1.0f, 10.0f);
@@ -266,13 +375,13 @@ public class CustomRenderer implements GLSurfaceView.Renderer{
         GLES20.glVertexAttribPointer(mTexHandle, 2, GLES20.GL_FLOAT, false, 0, texBuffer);
         GLES20.glEnableVertexAttribArray(mTexHandle);
 
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textureNames[0]);
+//        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+//        GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textureNames[0]);
         int sampleLoc = GLES20.glGetUniformLocation(programHandle, "s_Texture");
         GLES20.glUniform1i(sampleLoc, 0);
-//        vertexBuffer.position(3);
-//        GLES20.glVertexAttribPointer(mColorHandle, 4, GLES20.GL_FLOAT, false, 28, vertexBuffer);
-//        GLES20.glEnableVertexAttribArray(mColorHandle);
+
+        GLES20.glVertexAttribPointer(mColorHandle, 4, GLES20.GL_FLOAT, false, 0, colorBuffer);
+        GLES20.glEnableVertexAttribArray(mColorHandle);
 
         Matrix.setIdentityM(mMVPMatrix, 0);
         GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mMVPMatrix, 0);
@@ -282,6 +391,7 @@ public class CustomRenderer implements GLSurfaceView.Renderer{
 
         GLES20.glDisableVertexAttribArray(mPositionHandle);
         GLES20.glDisableVertexAttribArray(mColorHandle);
+        GLES20.glDisableVertexAttribArray(mTexHandle);
     }
 
 
